@@ -27,7 +27,7 @@ use rust_decimal::Decimal;
 use tokio::sync::mpsc;
 
 use crate::agent::AgentDeps;
-use crate::channels::{Channel, IncomingMessage, MessageStream, OutgoingResponse, StatusUpdate};
+use crate::channels::{Channel, ChannelManager, IncomingMessage, MessageStream, OutgoingResponse, StatusUpdate};
 use crate::db::Database;
 use crate::error::{ChannelError, LlmError};
 use crate::llm::{
@@ -321,6 +321,8 @@ pub struct TestHarness {
     pub deps: AgentDeps,
     /// Direct reference to the database (as `Arc<dyn Database>`).
     pub db: Arc<dyn Database>,
+    /// Stub channel sender + manager, present if `with_stub_channel()` was called.
+    pub channel: Option<(mpsc::Sender<IncomingMessage>, ChannelManager)>,
     /// Temp directory guard — keeps the test database alive. Dropped
     /// automatically when the harness goes out of scope.
     #[cfg(feature = "libsql")]
@@ -340,6 +342,7 @@ pub struct TestHarnessBuilder {
     db: Option<Arc<dyn Database>>,
     llm: Option<Arc<dyn LlmProvider>>,
     tools: Option<Arc<ToolRegistry>>,
+    stub_channel: bool,
 }
 
 impl TestHarnessBuilder {
@@ -349,6 +352,7 @@ impl TestHarnessBuilder {
             db: None,
             llm: None,
             tools: None,
+            stub_channel: false,
         }
     }
 
@@ -367,6 +371,15 @@ impl TestHarnessBuilder {
     /// Override the tool registry.
     pub fn with_tools(mut self, tools: Arc<ToolRegistry>) -> Self {
         self.tools = Some(tools);
+        self
+    }
+
+    /// Include a `StubChannel` wired into a `ChannelManager`.
+    ///
+    /// The harness will expose the sender (for injecting messages) and
+    /// the manager (for routing responses) via [`TestHarness::channel`].
+    pub fn with_stub_channel(mut self) -> Self {
+        self.stub_channel = true;
         self
     }
 
@@ -406,6 +419,15 @@ impl TestHarnessBuilder {
             max_actions_per_hour: None,
         }));
 
+        let channel = if self.stub_channel {
+            let (stub, sender) = StubChannel::new("stub");
+            let manager = ChannelManager::new();
+            manager.add(Box::new(stub)).await;
+            Some((sender, manager))
+        } else {
+            None
+        };
+
         let deps = AgentDeps {
             store: Some(Arc::clone(&db)),
             llm,
@@ -425,6 +447,7 @@ impl TestHarnessBuilder {
         TestHarness {
             deps,
             db,
+            channel,
             _temp_dir: temp_dir,
         }
     }
@@ -815,5 +838,26 @@ mod tests {
 
         channel.set_healthy(false);
         assert!(channel.health_check().await.is_err());
+    }
+
+    #[cfg(feature = "libsql")]
+    #[tokio::test]
+    async fn test_harness_with_channel() {
+        let harness = TestHarnessBuilder::new().with_stub_channel().build().await;
+
+        let (sender, channel_manager) = harness
+            .channel
+            .as_ref()
+            .expect("channel should be present");
+
+        // Inject a message via sender
+        sender
+            .send(IncomingMessage::new("stub", "user1", "test message"))
+            .await
+            .expect("send failed");
+
+        // Verify channel is registered in the manager
+        let names = channel_manager.channel_names().await;
+        assert!(names.contains(&"stub".to_string()));
     }
 }
