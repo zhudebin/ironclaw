@@ -890,4 +890,272 @@ mod tests {
         let err = super::extract_skill_from_zip(&zip).unwrap_err();
         assert!(err.to_string().contains("does not contain SKILL.md"));
     }
+
+    // ── ZIP extraction security regression tests ────────────────────────
+
+    /// Helper: build a minimal ZIP local file header with Store compression.
+    fn build_zip_entry_store(file_name: &str, content: &[u8]) -> Vec<u8> {
+        let mut zip = Vec::new();
+        zip.extend_from_slice(&[0x50, 0x4B, 0x03, 0x04]); // signature
+        zip.extend_from_slice(&[0x0A, 0x00]); // version needed (1.0)
+        zip.extend_from_slice(&[0x00, 0x00]); // flags
+        zip.extend_from_slice(&[0x00, 0x00]); // compression: store (0)
+        zip.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // mod time/date
+        zip.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // crc32
+        zip.extend_from_slice(&(content.len() as u32).to_le_bytes()); // compressed size
+        zip.extend_from_slice(&(content.len() as u32).to_le_bytes()); // uncompressed size
+        zip.extend_from_slice(&(file_name.len() as u16).to_le_bytes()); // filename length
+        zip.extend_from_slice(&0u16.to_le_bytes()); // extra field length
+        zip.extend_from_slice(file_name.as_bytes());
+        zip.extend_from_slice(content);
+        zip
+    }
+
+    #[test]
+    fn test_zip_extract_valid_skill() {
+        let content = b"---\nname: hello\n---\n# Hello Skill\nDoes things.\n";
+        let zip = build_zip_entry_store("SKILL.md", content);
+        let result = super::extract_skill_from_zip(&zip).unwrap();
+        assert_eq!(result, std::str::from_utf8(content).unwrap());
+    }
+
+    #[test]
+    fn test_zip_extract_ignores_non_skill_entries() {
+        // ZIP with README.md and src/main.rs but no SKILL.md -- should error.
+        let mut zip = Vec::new();
+        zip.extend_from_slice(&build_zip_entry_store("README.md", b"# Readme"));
+        zip.extend_from_slice(&build_zip_entry_store("src/main.rs", b"fn main() {}"));
+
+        let err = super::extract_skill_from_zip(&zip).unwrap_err();
+        assert!(
+            err.to_string().contains("does not contain SKILL.md"),
+            "Expected 'does not contain SKILL.md' error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_zip_extract_path_traversal_rejected() {
+        // An entry named "../../SKILL.md" must NOT match the exact "SKILL.md" check.
+        let content = b"---\nname: evil\n---\n# Malicious path traversal\n";
+        let zip = build_zip_entry_store("../../SKILL.md", content);
+
+        let err = super::extract_skill_from_zip(&zip).unwrap_err();
+        assert!(
+            err.to_string().contains("does not contain SKILL.md"),
+            "Path traversal entry should not match SKILL.md, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_zip_extract_nested_path_not_matched() {
+        // An entry named "subdir/SKILL.md" must NOT match the exact "SKILL.md" check.
+        let content = b"---\nname: nested\n---\n# Nested\n";
+        let zip = build_zip_entry_store("subdir/SKILL.md", content);
+
+        let err = super::extract_skill_from_zip(&zip).unwrap_err();
+        assert!(
+            err.to_string().contains("does not contain SKILL.md"),
+            "Nested path should not match SKILL.md, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_zip_extract_oversized_rejected() {
+        // Create a ZIP entry whose declared uncompressed_size exceeds MAX_DECOMPRESSED (1 MB).
+        let oversized_claim: u32 = 2 * 1024 * 1024; // 2 MB
+        let small_body = b"tiny";
+
+        let mut zip = Vec::new();
+        zip.extend_from_slice(&[0x50, 0x4B, 0x03, 0x04]); // signature
+        zip.extend_from_slice(&[0x0A, 0x00]); // version needed
+        zip.extend_from_slice(&[0x00, 0x00]); // flags
+        zip.extend_from_slice(&[0x00, 0x00]); // compression: store
+        zip.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // mod time/date
+        zip.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // crc32
+        zip.extend_from_slice(&(small_body.len() as u32).to_le_bytes()); // compressed size (actual)
+        zip.extend_from_slice(&oversized_claim.to_le_bytes()); // uncompressed size (forged)
+        zip.extend_from_slice(&8u16.to_le_bytes()); // filename length
+        zip.extend_from_slice(&0u16.to_le_bytes()); // extra field length
+        zip.extend_from_slice(b"SKILL.md");
+        zip.extend_from_slice(small_body);
+
+        let err = super::extract_skill_from_zip(&zip).unwrap_err();
+        assert!(
+            err.to_string().contains("too large"),
+            "Oversized entry should be rejected, got: {}",
+            err
+        );
+    }
+
+    // ── SSRF prevention regression tests ────────────────────────────────
+
+    #[test]
+    fn test_is_private_ip_blocks_loopback() {
+        let loopback: std::net::IpAddr = "127.0.0.1".parse().unwrap();
+        // is_private_ip checks v4.is_private() which does NOT include loopback,
+        // but validate_fetch_url checks is_loopback() separately. Test the full flow.
+        assert!(loopback.is_loopback());
+        // Also verify via validate_fetch_url
+        assert!(super::validate_fetch_url("https://127.0.0.1/skill.md").is_err());
+    }
+
+    #[test]
+    fn test_is_private_ip_blocks_private_ranges() {
+        let cases: Vec<(&str, bool)> = vec![
+            ("10.0.0.1", true),
+            ("10.255.255.255", true),
+            ("172.16.0.1", true),
+            ("172.31.255.255", true),
+            ("192.168.1.1", true),
+            ("192.168.0.0", true),
+        ];
+        for (ip_str, expect_private) in cases {
+            let ip: std::net::IpAddr = ip_str.parse().unwrap();
+            assert_eq!(
+                super::is_private_ip(&ip),
+                expect_private,
+                "Expected is_private_ip({}) = {}",
+                ip_str,
+                expect_private
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_private_ip_blocks_link_local() {
+        // 169.254.0.0/16 range (link-local)
+        let cases = vec!["169.254.1.1", "169.254.0.1", "169.254.255.255"];
+        for ip_str in cases {
+            let ip: std::net::IpAddr = ip_str.parse().unwrap();
+            // is_private_ip includes v4.is_link_local()
+            assert!(
+                super::is_private_ip(&ip),
+                "Expected is_private_ip({}) = true (link-local)",
+                ip_str
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_private_ip_allows_public() {
+        let public_ips = vec!["8.8.8.8", "1.1.1.1", "93.184.216.34", "151.101.1.67"];
+        for ip_str in public_ips {
+            let ip: std::net::IpAddr = ip_str.parse().unwrap();
+            assert!(
+                !super::is_private_ip(&ip),
+                "Expected is_private_ip({}) = false (public IP)",
+                ip_str
+            );
+            assert!(
+                !ip.is_loopback(),
+                "Expected {} is not loopback",
+                ip_str
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_private_ip_blocks_ipv4_mapped_ipv6() {
+        // Test the IPv4-mapped unwrapping logic: validate_fetch_url parses the
+        // IP, checks if it's V6, calls to_ipv4_mapped(), then checks the
+        // unwrapped V4 address against private/loopback.
+        //
+        // NOTE: url::Url::host_str() returns bracketed IPv6 (e.g. "[::ffff:7f00:1]")
+        // which std IpAddr cannot parse. This means validate_fetch_url currently
+        // does NOT catch IPv6 addresses in URLs -- the parse::<IpAddr>() silently
+        // fails and falls through. This is a known gap (tracked separately).
+        //
+        // Here we test the underlying is_private_ip + to_ipv4_mapped logic
+        // directly to ensure the detection works when given a proper IpAddr.
+        use std::net::{IpAddr, Ipv6Addr};
+
+        // ::ffff:127.0.0.1 mapped -> 127.0.0.1 (loopback)
+        let v6_loopback: Ipv6Addr = "::ffff:127.0.0.1".parse().unwrap();
+        let mapped = v6_loopback.to_ipv4_mapped().expect("should be IPv4-mapped");
+        assert!(
+            IpAddr::V4(mapped).is_loopback(),
+            "Mapped ::ffff:127.0.0.1 should be loopback"
+        );
+
+        // ::ffff:192.168.1.1 mapped -> 192.168.1.1 (private)
+        let v6_private: Ipv6Addr = "::ffff:192.168.1.1".parse().unwrap();
+        let mapped = v6_private.to_ipv4_mapped().expect("should be IPv4-mapped");
+        assert!(
+            super::is_private_ip(&IpAddr::V4(mapped)),
+            "Mapped ::ffff:192.168.1.1 should be private"
+        );
+
+        // ::ffff:10.0.0.1 mapped -> 10.0.0.1 (private)
+        let v6_ten: Ipv6Addr = "::ffff:10.0.0.1".parse().unwrap();
+        let mapped = v6_ten.to_ipv4_mapped().expect("should be IPv4-mapped");
+        assert!(
+            super::is_private_ip(&IpAddr::V4(mapped)),
+            "Mapped ::ffff:10.0.0.1 should be private"
+        );
+
+        // ::ffff:8.8.8.8 mapped -> 8.8.8.8 (public, should NOT be private)
+        let v6_public: Ipv6Addr = "::ffff:8.8.8.8".parse().unwrap();
+        let mapped = v6_public.to_ipv4_mapped().expect("should be IPv4-mapped");
+        assert!(
+            !super::is_private_ip(&IpAddr::V4(mapped)),
+            "Mapped ::ffff:8.8.8.8 should NOT be private"
+        );
+    }
+
+    #[test]
+    fn test_is_restricted_host_blocks_metadata() {
+        // Cloud metadata endpoint (AWS/GCP/Azure style)
+        let err =
+            super::validate_fetch_url("https://169.254.169.254/latest/meta-data/").unwrap_err();
+        assert!(
+            err.to_string().contains("private") || err.to_string().contains("link-local"),
+            "Metadata IP should be blocked, got: {}",
+            err
+        );
+
+        // GCP metadata hostname
+        let err =
+            super::validate_fetch_url("https://metadata.google.internal/something").unwrap_err();
+        assert!(
+            err.to_string().contains("internal hostname"),
+            "metadata.google.internal should be blocked, got: {}",
+            err
+        );
+
+        // Generic .internal domain
+        let err = super::validate_fetch_url("https://service.internal/api").unwrap_err();
+        assert!(
+            err.to_string().contains("internal hostname"),
+            ".internal domains should be blocked, got: {}",
+            err
+        );
+
+        // .local domain
+        let err = super::validate_fetch_url("https://myhost.local/skill.md").unwrap_err();
+        assert!(
+            err.to_string().contains("internal hostname"),
+            ".local domains should be blocked, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_is_restricted_host_allows_normal() {
+        let allowed = vec![
+            "https://github.com/repo/SKILL.md",
+            "https://clawhub.dev/api/v1/download?slug=foo",
+            "https://raw.githubusercontent.com/user/repo/main/SKILL.md",
+            "https://example.com/skills/deploy.md",
+        ];
+        for url in allowed {
+            assert!(
+                super::validate_fetch_url(url).is_ok(),
+                "Expected validate_fetch_url({}) to succeed",
+                url
+            );
+        }
+    }
 }
