@@ -413,6 +413,7 @@ impl ExtensionManager {
                             has_auth: false,
                             installed: true,
                             activation_error: None,
+                            version: None,
                         });
                     }
                 }
@@ -428,15 +429,28 @@ impl ExtensionManager {
         {
             match discover_tools(&self.wasm_tools_dir).await {
                 Ok(tools) => {
-                    for (name, _discovered) in tools {
+                    for (name, discovered) in tools {
                         let active = self.tool_registry.has(&name).await;
 
-                        let display_name = self
+                        let registry_entry = self
                             .registry
                             .get_with_kind(&name, Some(ExtensionKind::WasmTool))
-                            .await
-                            .map(|e| e.display_name);
+                            .await;
+                        let display_name = registry_entry.as_ref().map(|e| e.display_name.clone());
                         let auth_state = self.check_tool_auth_status(&name).await;
+                        let version = if let Some(ref cap_path) = discovered.capabilities_path {
+                            tokio::fs::read(cap_path)
+                                .await
+                                .ok()
+                                .and_then(|bytes| {
+                                    crate::tools::wasm::CapabilitiesFile::from_bytes(&bytes).ok()
+                                })
+                                .and_then(|cap| cap.version)
+                        } else {
+                            None
+                        };
+                        let version =
+                            version.or_else(|| registry_entry.and_then(|e| e.version.clone()));
                         extensions.push(InstalledExtension {
                             name: name.clone(),
                             kind: ExtensionKind::WasmTool,
@@ -450,6 +464,7 @@ impl ExtensionManager {
                             has_auth: auth_state != ToolAuthState::NoAuth,
                             installed: true,
                             activation_error: None,
+                            version,
                         });
                     }
                 }
@@ -467,15 +482,32 @@ impl ExtensionManager {
                 Ok(channels) => {
                     let active_names = self.active_channel_names.read().await;
                     let errors = self.activation_errors.read().await;
-                    for (name, _discovered) in channels {
+                    for (name, discovered) in channels {
                         let active = active_names.contains(&name);
                         let auth_state = self.check_channel_auth_status(&name).await;
                         let activation_error = errors.get(&name).cloned();
-                        let display_name = self
+                        let registry_entry = self
                             .registry
                             .get_with_kind(&name, Some(ExtensionKind::WasmChannel))
-                            .await
-                            .map(|e| e.display_name);
+                            .await;
+                        let display_name =
+                            registry_entry.as_ref().map(|e| e.display_name.clone());
+                        let version = if let Some(ref cap_path) = discovered.capabilities_path {
+                            tokio::fs::read(cap_path)
+                                .await
+                                .ok()
+                                .and_then(|bytes| {
+                                    crate::channels::wasm::ChannelCapabilitiesFile::from_bytes(
+                                        &bytes,
+                                    )
+                                    .ok()
+                                })
+                                .and_then(|cap| cap.version)
+                        } else {
+                            None
+                        };
+                        let version =
+                            version.or_else(|| registry_entry.and_then(|e| e.version.clone()));
                         extensions.push(InstalledExtension {
                             name,
                             kind: ExtensionKind::WasmChannel,
@@ -489,6 +521,7 @@ impl ExtensionManager {
                             has_auth: false,
                             installed: true,
                             activation_error,
+                            version,
                         });
                     }
                 }
@@ -527,6 +560,7 @@ impl ExtensionManager {
                     has_auth: false,
                     installed: false,
                     activation_error: None,
+                    version: entry.version,
                 });
             }
         }

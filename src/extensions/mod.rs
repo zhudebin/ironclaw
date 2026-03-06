@@ -70,6 +70,9 @@ pub struct RegistryEntry {
     pub fallback_source: Option<Box<ExtensionSource>>,
     /// How authentication works.
     pub auth_hint: AuthHint,
+    /// Extension version (semver), if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
 }
 
 /// Where the extension binary or server lives.
@@ -473,6 +476,9 @@ pub struct InstalledExtension {
     /// Last activation error for WASM channels.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub activation_error: Option<String>,
+    /// Extension version from capabilities file (semver).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
 }
 
 /// Error type for extension operations.
