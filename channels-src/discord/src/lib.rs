@@ -414,6 +414,7 @@ fn handle_slash_command(interaction: &DiscordInteraction) -> bool {
         content,
         thread_id: None,
         metadata_json,
+        attachments: vec![],
     });
     true
 }
@@ -467,6 +468,7 @@ fn handle_message_component(interaction: &DiscordInteraction, message: &DiscordM
         content: format!("[Button clicked] {}", message.content),
         thread_id: None,
         metadata_json,
+        attachments: vec![],
     });
 }
 
@@ -682,5 +684,37 @@ mod tests {
         let parsed: DiscordMessageMetadata = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.channel_id, "123");
         assert_eq!(parsed.interaction_id, "456");
+    }
+
+    #[test]
+    fn test_discord_emit_message_has_empty_attachments() {
+        // Discord currently doesn't parse attachments from interactions,
+        // so emitted messages should have empty attachment lists.
+        // This tests backward compatibility.
+        let json = r#"{
+            "type": 2,
+            "id": "int_1",
+            "application_id": "app_1",
+            "channel_id": "ch_1",
+            "member": {
+                "user": {
+                    "id": "user_1",
+                    "username": "testuser",
+                    "global_name": "Test User"
+                }
+            },
+            "data": {
+                "id": "cmd_1",
+                "name": "ask",
+                "options": [
+                    {"name": "question", "value": "What is rust?"}
+                ]
+            },
+            "token": "token_abc"
+        }"#;
+
+        let interaction: DiscordInteraction = serde_json::from_str(json).unwrap();
+        assert_eq!(interaction.interaction_type, 2);
+        assert!(interaction.data.is_some());
     }
 }

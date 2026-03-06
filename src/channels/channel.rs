@@ -10,6 +10,25 @@ use uuid::Uuid;
 
 use crate::error::ChannelError;
 
+/// A file or media attachment on an incoming message.
+#[derive(Debug, Clone)]
+pub struct IncomingAttachment {
+    /// Unique identifier within the channel (e.g., Telegram file_id).
+    pub id: String,
+    /// MIME type (e.g., "image/jpeg", "application/pdf").
+    pub mime_type: String,
+    /// Original filename, if known.
+    pub filename: Option<String>,
+    /// File size in bytes, if known.
+    pub size_bytes: Option<u64>,
+    /// URL to download the file from the channel's API.
+    pub source_url: Option<String>,
+    /// Opaque key for host-side storage (e.g., after download/caching).
+    pub storage_key: Option<String>,
+    /// Extracted text content (e.g., OCR result, PDF text, audio transcript).
+    pub extracted_text: Option<String>,
+}
+
 /// A message received from an external channel.
 #[derive(Debug, Clone)]
 pub struct IncomingMessage {
@@ -29,6 +48,8 @@ pub struct IncomingMessage {
     pub received_at: DateTime<Utc>,
     /// Channel-specific metadata.
     pub metadata: serde_json::Value,
+    /// File or media attachments on this message.
+    pub attachments: Vec<IncomingAttachment>,
 }
 
 impl IncomingMessage {
@@ -47,6 +68,7 @@ impl IncomingMessage {
             thread_id: None,
             received_at: Utc::now(),
             metadata: serde_json::Value::Null,
+            attachments: Vec::new(),
         }
     }
 
@@ -65,6 +87,12 @@ impl IncomingMessage {
     /// Set user name.
     pub fn with_user_name(mut self, name: impl Into<String>) -> Self {
         self.user_name = Some(name.into());
+        self
+    }
+
+    /// Set attachments.
+    pub fn with_attachments(mut self, attachments: Vec<IncomingAttachment>) -> Self {
+        self.attachments = attachments;
         self
     }
 }

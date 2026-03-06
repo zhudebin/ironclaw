@@ -113,6 +113,25 @@ interface channel-host {
 
     // ==================== Channel-Specific Capabilities ====================
 
+    /// A file or media attachment on an incoming message.
+    record attachment {
+        /// Unique identifier within the channel (e.g., Telegram file_id).
+        id: string,
+        /// MIME type (e.g., "image/jpeg", "application/pdf").
+        mime-type: string,
+        /// Original filename, if known.
+        filename: option<string>,
+        /// File size in bytes, if known.
+        size-bytes: option<u64>,
+        /// URL to download the file from the channel's API.
+        /// May require authentication (handled by host credential injection).
+        source-url: option<string>,
+        /// Opaque key for host-side storage (e.g., after download/caching).
+        storage-key: option<string>,
+        /// Extracted text content (e.g., OCR result, PDF text, audio transcript).
+        extracted-text: option<string>,
+    }
+
     /// A message to emit to the agent.
     record emitted-message {
         /// User identifier within the channel (e.g., Slack user ID).
@@ -125,6 +144,8 @@ interface channel-host {
         thread-id: option<string>,
         /// Channel-specific metadata as JSON string.
         metadata-json: string,
+        /// File or media attachments on this message.
+        attachments: list<attachment>,
     }
 
     /// Emit a message to the agent.

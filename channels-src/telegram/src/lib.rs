@@ -33,7 +33,7 @@ use exports::near::agent::channel::{
     AgentResponse, ChannelConfig, Guest, HttpEndpointConfig, IncomingHttpRequest,
     OutgoingHttpResponse, PollConfig, StatusType, StatusUpdate,
 };
-use near::agent::channel_host::{self, EmittedMessage};
+use near::agent::channel_host::{self, Attachment, EmittedMessage};
 
 // ============================================================================
 // Telegram API Types
@@ -81,6 +81,84 @@ struct TelegramMessage {
 
     /// Bot command entities (for /commands).
     entities: Option<Vec<MessageEntity>>,
+
+    /// Photo sizes (Telegram sends multiple sizes; last is largest).
+    #[serde(default)]
+    photo: Option<Vec<PhotoSize>>,
+
+    /// Document attachment.
+    document: Option<TelegramDocument>,
+
+    /// Audio attachment.
+    audio: Option<TelegramAudio>,
+
+    /// Video attachment.
+    video: Option<TelegramVideo>,
+
+    /// Voice message.
+    voice: Option<TelegramVoice>,
+
+    /// Sticker.
+    sticker: Option<TelegramSticker>,
+}
+
+/// Telegram PhotoSize object.
+#[derive(Debug, Deserialize)]
+struct PhotoSize {
+    file_id: String,
+    file_unique_id: String,
+    width: i32,
+    height: i32,
+    file_size: Option<i64>,
+}
+
+/// Telegram Document object.
+#[derive(Debug, Deserialize)]
+struct TelegramDocument {
+    file_id: String,
+    file_unique_id: String,
+    file_name: Option<String>,
+    mime_type: Option<String>,
+    file_size: Option<i64>,
+}
+
+/// Telegram Audio object.
+#[derive(Debug, Deserialize)]
+struct TelegramAudio {
+    file_id: String,
+    file_unique_id: String,
+    file_name: Option<String>,
+    mime_type: Option<String>,
+    file_size: Option<i64>,
+}
+
+/// Telegram Video object.
+#[derive(Debug, Deserialize)]
+struct TelegramVideo {
+    file_id: String,
+    file_unique_id: String,
+    file_name: Option<String>,
+    mime_type: Option<String>,
+    file_size: Option<i64>,
+}
+
+/// Telegram Voice message object.
+#[derive(Debug, Deserialize)]
+struct TelegramVoice {
+    file_id: String,
+    file_unique_id: String,
+    mime_type: Option<String>,
+    file_size: Option<i64>,
+}
+
+/// Telegram Sticker object.
+#[derive(Debug, Deserialize)]
+struct TelegramSticker {
+    file_id: String,
+    file_unique_id: String,
+    #[serde(rename = "type")]
+    sticker_type: Option<String>,
+    file_size: Option<i64>,
 }
 
 /// Telegram User object.
@@ -990,8 +1068,128 @@ fn handle_update(update: TelegramUpdate) {
     }
 }
 
+/// Extract attachments from a Telegram message.
+fn extract_attachments(message: &TelegramMessage) -> Vec<Attachment> {
+    let mut attachments = Vec::new();
+
+    // Photo: Telegram sends multiple sizes; use the largest (last).
+    if let Some(ref photos) = message.photo {
+        if let Some(largest) = photos.last() {
+            attachments.push(Attachment {
+                id: largest.file_id.clone(),
+                mime_type: "image/jpeg".to_string(),
+                filename: None,
+                size_bytes: largest.file_size.map(|s| s as u64),
+                source_url: Some(format!(
+                    "https://api.telegram.org/bot{{TELEGRAM_BOT_TOKEN}}/getFile?file_id={}",
+                    largest.file_id
+                )),
+                storage_key: None,
+                extracted_text: None,
+            });
+        }
+    }
+
+    // Document
+    if let Some(ref doc) = message.document {
+        attachments.push(Attachment {
+            id: doc.file_id.clone(),
+            mime_type: doc
+                .mime_type
+                .clone()
+                .unwrap_or_else(|| "application/octet-stream".to_string()),
+            filename: doc.file_name.clone(),
+            size_bytes: doc.file_size.map(|s| s as u64),
+            source_url: Some(format!(
+                "https://api.telegram.org/bot{{TELEGRAM_BOT_TOKEN}}/getFile?file_id={}",
+                doc.file_id
+            )),
+            storage_key: None,
+            extracted_text: None,
+        });
+    }
+
+    // Audio
+    if let Some(ref audio) = message.audio {
+        attachments.push(Attachment {
+            id: audio.file_id.clone(),
+            mime_type: audio
+                .mime_type
+                .clone()
+                .unwrap_or_else(|| "audio/mpeg".to_string()),
+            filename: audio.file_name.clone(),
+            size_bytes: audio.file_size.map(|s| s as u64),
+            source_url: Some(format!(
+                "https://api.telegram.org/bot{{TELEGRAM_BOT_TOKEN}}/getFile?file_id={}",
+                audio.file_id
+            )),
+            storage_key: None,
+            extracted_text: None,
+        });
+    }
+
+    // Video
+    if let Some(ref video) = message.video {
+        attachments.push(Attachment {
+            id: video.file_id.clone(),
+            mime_type: video
+                .mime_type
+                .clone()
+                .unwrap_or_else(|| "video/mp4".to_string()),
+            filename: video.file_name.clone(),
+            size_bytes: video.file_size.map(|s| s as u64),
+            source_url: Some(format!(
+                "https://api.telegram.org/bot{{TELEGRAM_BOT_TOKEN}}/getFile?file_id={}",
+                video.file_id
+            )),
+            storage_key: None,
+            extracted_text: None,
+        });
+    }
+
+    // Voice
+    if let Some(ref voice) = message.voice {
+        attachments.push(Attachment {
+            id: voice.file_id.clone(),
+            mime_type: voice
+                .mime_type
+                .clone()
+                .unwrap_or_else(|| "audio/ogg".to_string()),
+            filename: None,
+            size_bytes: voice.file_size.map(|s| s as u64),
+            source_url: Some(format!(
+                "https://api.telegram.org/bot{{TELEGRAM_BOT_TOKEN}}/getFile?file_id={}",
+                voice.file_id
+            )),
+            storage_key: None,
+            extracted_text: None,
+        });
+    }
+
+    // Sticker
+    if let Some(ref sticker) = message.sticker {
+        attachments.push(Attachment {
+            id: sticker.file_id.clone(),
+            mime_type: "image/webp".to_string(),
+            filename: None,
+            size_bytes: sticker.file_size.map(|s| s as u64),
+            source_url: Some(format!(
+                "https://api.telegram.org/bot{{TELEGRAM_BOT_TOKEN}}/getFile?file_id={}",
+                sticker.file_id
+            )),
+            storage_key: None,
+            extracted_text: None,
+        });
+    }
+
+    attachments
+}
+
 /// Process a single message.
 fn handle_message(message: TelegramMessage) {
+    // Extract attachments from media fields
+    let attachments = extract_attachments(&message);
+
     // Use text or caption (for media messages)
     let content = message
         .text
@@ -999,7 +1197,8 @@ fn handle_message(message: TelegramMessage) {
         .or_else(|| message.caption.filter(|c| !c.is_empty()))
         .unwrap_or_default();
 
-    if content.is_empty() {
+    // Allow messages with attachments even if text content is empty
+    if content.is_empty() && attachments.is_empty() {
         return;
     }
 
@@ -1155,6 +1354,8 @@ fn handle_message(message: TelegramMessage) {
         },
     ) {
         Some(value) => value,
+        // Allow attachment-only messages even without text
+        None if !attachments.is_empty() => String::new(),
         None => return,
     };
 
@@ -1165,6 +1366,7 @@ fn handle_message(message: TelegramMessage) {
         content: content_to_emit,
         thread_id: None, // Telegram doesn't have threads in the same way
         metadata_json,
+        attachments,
     });
 
     channel_host::log(
@@ -1739,5 +1941,205 @@ mod tests {
         let msg = status_message_for_user(&update).expect("expected message");
         assert!(msg.len() <= TELEGRAM_STATUS_MAX_CHARS + 3);
         assert!(msg.ends_with("..."));
+    }
+
+    // === Attachment extraction fixture tests ===
+
+    #[test]
+    fn test_extract_attachments_photo() {
+        let json = r#"{
+            "message_id": 1,
+            "from": {"id": 1, "is_bot": false, "first_name": "A"},
+            "chat": {"id": 1, "type": "private"},
+            "caption": "What is this?",
+            "photo": [
+                {"file_id": "small_id", "file_unique_id": "s1", "width": 90, "height": 90, "file_size": 1234},
+                {"file_id": "large_id", "file_unique_id": "l1", "width": 800, "height": 600, "file_size": 54321}
+            ]
+        }"#;
+        let msg: TelegramMessage = serde_json::from_str(json).unwrap();
+        let attachments = extract_attachments(&msg);
+
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].id, "large_id"); // Largest photo
+        assert_eq!(attachments[0].mime_type, "image/jpeg");
+        assert_eq!(attachments[0].size_bytes, Some(54321));
+        assert!(attachments[0].source_url.as_ref().unwrap().contains("large_id"));
+    }
+
+    #[test]
+    fn test_extract_attachments_document() {
+        let json = r#"{
+            "message_id": 2,
+            "from": {"id": 1, "is_bot": false, "first_name": "A"},
+            "chat": {"id": 1, "type": "private"},
+            "document": {
+                "file_id": "doc_abc",
+                "file_unique_id": "d1",
+                "file_name": "report.pdf",
+                "mime_type": "application/pdf",
+                "file_size": 102400
+            },
+            "caption": "Here is the report"
+        }"#;
+        let msg: TelegramMessage = serde_json::from_str(json).unwrap();
+        let attachments = extract_attachments(&msg);
+
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].id, "doc_abc");
+        assert_eq!(attachments[0].mime_type, "application/pdf");
+        assert_eq!(attachments[0].filename, Some("report.pdf".to_string()));
+        assert_eq!(attachments[0].size_bytes, Some(102400));
+    }
+
+    #[test]
+    fn test_extract_attachments_voice() {
+        let json = r#"{
+            "message_id": 3,
+            "from": {"id": 1, "is_bot": false, "first_name": "A"},
+            "chat": {"id": 1, "type": "private"},
+            "voice": {
+                "file_id": "voice_xyz",
+                "file_unique_id": "v1",
+                "mime_type": "audio/ogg",
+                "file_size": 9000
+            }
+        }"#;
+        let msg: TelegramMessage = serde_json::from_str(json).unwrap();
+        let attachments = extract_attachments(&msg);
+
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].id, "voice_xyz");
+        assert_eq!(attachments[0].mime_type, "audio/ogg");
+        assert!(attachments[0].filename.is_none());
+    }
+
+    #[test]
+    fn test_extract_attachments_video() {
+        let json = r#"{
+            "message_id": 4,
+            "from": {"id": 1, "is_bot": false, "first_name": "A"},
+            "chat": {"id": 1, "type": "private"},
+            "video": {
+                "file_id": "vid_1",
+                "file_unique_id": "vv1",
+                "file_name": "clip.mp4",
+                "mime_type": "video/mp4",
+                "file_size": 5000000
+            },
+            "caption": "Check this out"
+        }"#;
+        let msg: TelegramMessage = serde_json::from_str(json).unwrap();
+        let attachments = extract_attachments(&msg);
+
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].id, "vid_1");
+        assert_eq!(attachments[0].mime_type, "video/mp4");
+        assert_eq!(attachments[0].filename, Some("clip.mp4".to_string()));
+    }
+
+    #[test]
+    fn test_extract_attachments_audio() {
+        let json = r#"{
+            "message_id": 5,
+            "from": {"id": 1, "is_bot": false, "first_name": "A"},
+            "chat": {"id": 1, "type": "private"},
+            "audio": {
+                "file_id": "audio_1",
+                "file_unique_id": "a1",
+                "file_name": "song.mp3",
+                "mime_type": "audio/mpeg",
+                "file_size": 3000000
+            }
+        }"#;
+        let msg: TelegramMessage = serde_json::from_str(json).unwrap();
+        let attachments = extract_attachments(&msg);
+
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].id, "audio_1");
+        assert_eq!(attachments[0].mime_type, "audio/mpeg");
+        assert_eq!(attachments[0].filename, Some("song.mp3".to_string()));
+    }
+
+    #[test]
+    fn test_extract_attachments_sticker() {
+        let json = r#"{
+            "message_id": 6,
+            "from": {"id": 1, "is_bot": false, "first_name": "A"},
+            "chat": {"id": 1, "type": "private"},
+            "sticker": {
+                "file_id": "sticker_1",
+                "file_unique_id": "st1",
+                "type": "regular",
+                "file_size": 20000
+            }
+        }"#;
+        let msg: TelegramMessage = serde_json::from_str(json).unwrap();
+        let attachments = extract_attachments(&msg);
+
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].id, "sticker_1");
+        assert_eq!(attachments[0].mime_type, "image/webp");
+    }
+
+    #[test]
+    fn test_extract_attachments_text_only_empty() {
+        let json = r#"{
+            "message_id": 7,
+            "from": {"id": 1, "is_bot": false, "first_name": "A"},
+            "chat": {"id": 1, "type": "private"},
+            "text": "Hello"
+        }"#;
+        let msg: TelegramMessage = serde_json::from_str(json).unwrap();
+        let attachments = extract_attachments(&msg);
+
+        assert!(attachments.is_empty());
+    }
+
+    #[test]
+    fn test_extract_attachments_multiple_types() {
+        let json = r#"{
+            "message_id": 8,
+            "from": {"id": 1, "is_bot": false, "first_name": "A"},
+            "chat": {"id": 1, "type": "private"},
+            "photo": [
+                {"file_id": "photo_1", "file_unique_id": "p1", "width": 100, "height": 100}
+            ],
+            "document": {
+                "file_id": "doc_1",
+                "file_unique_id": "d1",
+                "file_name": "file.txt",
+                "mime_type": "text/plain"
+            }
+        }"#;
+        let msg: TelegramMessage = serde_json::from_str(json).unwrap();
+        let attachments = extract_attachments(&msg);
+
+        // Both photo and document should be extracted
+        assert_eq!(attachments.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_update_with_photo_fallback_content() {
+        // A photo-only message (no text, no caption) should have empty content
+        // but still produce attachments
+        let json = r#"{
+            "message_id": 9,
+            "from": {"id": 42, "is_bot": false, "first_name": "Test"},
+            "chat": {"id": 42, "type": "private"},
+            "photo": [
+                {"file_id": "ph1", "file_unique_id": "u1", "width": 320, "height": 240}
+            ]
+        }"#;
+        let msg: TelegramMessage = serde_json::from_str(json).unwrap();
+
+        // Content is empty (no text, no caption)
+        assert!(msg.text.is_none());
+        assert!(msg.caption.is_none());
+
+        // But attachments exist
+        let attachments = extract_attachments(&msg);
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].id, "ph1");
     }
 }

@@ -532,8 +532,23 @@ impl near::agent::channel_host::Host for ChannelStoreData {
             user_id = %msg.user_id,
             user_name = ?msg.user_name,
             content_len = msg.content.len(),
+            attachment_count = msg.attachments.len(),
             "WASM emit_message called"
         );
+
+        let attachments: Vec<crate::channels::wasm::host::Attachment> = msg
+            .attachments
+            .iter()
+            .map(|a| crate::channels::wasm::host::Attachment {
+                id: a.id.clone(),
+                mime_type: a.mime_type.clone(),
+                filename: a.filename.clone(),
+                size_bytes: a.size_bytes,
+                source_url: a.source_url.clone(),
+                storage_key: a.storage_key.clone(),
+                extracted_text: a.extracted_text.clone(),
+            })
+            .collect();
 
         let mut emitted = EmittedMessage::new(msg.user_id.clone(), msg.content.clone());
         if let Some(name) = msg.user_name {
@@ -543,6 +558,7 @@ impl near::agent::channel_host::Host for ChannelStoreData {
             emitted = emitted.with_thread_id(tid);
         }
         emitted = emitted.with_metadata(msg.metadata_json);
+        emitted = emitted.with_attachments(attachments);
 
         match self.host_state.emit_message(emitted) {
             Ok(()) => {
@@ -1847,6 +1863,24 @@ impl WasmChannel {
                 msg = msg.with_thread(thread_id);
             }
 
+            // Convert attachments
+            if !emitted.attachments.is_empty() {
+                let incoming_attachments = emitted
+                    .attachments
+                    .iter()
+                    .map(|a| crate::channels::IncomingAttachment {
+                        id: a.id.clone(),
+                        mime_type: a.mime_type.clone(),
+                        filename: a.filename.clone(),
+                        size_bytes: a.size_bytes,
+                        source_url: a.source_url.clone(),
+                        storage_key: a.storage_key.clone(),
+                        extracted_text: a.extracted_text.clone(),
+                    })
+                    .collect();
+                msg = msg.with_attachments(incoming_attachments);
+            }
+
             // Parse metadata JSON
             if let Ok(metadata) = serde_json::from_str(&emitted.metadata_json) {
                 msg = msg.with_metadata(metadata);
@@ -1859,6 +1893,7 @@ impl WasmChannel {
                 channel = %self.name,
                 user_id = %emitted.user_id,
                 content_len = emitted.content.len(),
+                attachment_count = msg.attachments.len(),
                 "Sending emitted message to agent"
             );
 
@@ -2112,6 +2147,24 @@ impl WasmChannel {
                 msg = msg.with_thread(thread_id);
             }
 
+            // Convert attachments
+            if !emitted.attachments.is_empty() {
+                let incoming_attachments = emitted
+                    .attachments
+                    .iter()
+                    .map(|a| crate::channels::IncomingAttachment {
+                        id: a.id.clone(),
+                        mime_type: a.mime_type.clone(),
+                        filename: a.filename.clone(),
+                        size_bytes: a.size_bytes,
+                        source_url: a.source_url.clone(),
+                        storage_key: a.storage_key.clone(),
+                        extracted_text: a.extracted_text.clone(),
+                    })
+                    .collect();
+                msg = msg.with_attachments(incoming_attachments);
+            }
+
             // Parse metadata JSON
             if let Ok(metadata) = serde_json::from_str(&emitted.metadata_json) {
                 msg = msg.with_metadata(metadata);
@@ -2130,6 +2183,7 @@ impl WasmChannel {
                 channel = %channel_name,
                 user_id = %emitted.user_id,
                 content_len = emitted.content.len(),
+                attachment_count = msg.attachments.len(),
                 "Sending polled message to agent"
             );
 
@@ -3870,5 +3924,115 @@ mod tests {
         .expect("spawn_blocking panicked");
         // 404 because "000" is not a valid bot token
         assert_eq!(result, 404);
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_emitted_messages_preserves_attachments() {
+        use crate::channels::wasm::host::{Attachment, EmittedMessage};
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(10);
+        let message_tx = Arc::new(tokio::sync::RwLock::new(Some(tx)));
+
+        let rate_limiter = Arc::new(tokio::sync::RwLock::new(
+            crate::channels::wasm::host::ChannelEmitRateLimiter::new(
+                crate::channels::wasm::capabilities::EmitRateLimitConfig::default(),
+            ),
+        ));
+
+        let attachments = vec![
+            Attachment {
+                id: "photo123".to_string(),
+                mime_type: "image/jpeg".to_string(),
+                filename: Some("cat.jpg".to_string()),
+                size_bytes: Some(50_000),
+                source_url: Some("https://api.telegram.org/file/photo123".to_string()),
+                storage_key: None,
+                extracted_text: None,
+            },
+            Attachment {
+                id: "doc456".to_string(),
+                mime_type: "application/pdf".to_string(),
+                filename: Some("report.pdf".to_string()),
+                size_bytes: Some(120_000),
+                source_url: None,
+                storage_key: Some("store/doc456".to_string()),
+                extracted_text: Some("Report contents...".to_string()),
+            },
+        ];
+
+        let messages =
+            vec![EmittedMessage::new("user1", "Check these files").with_attachments(attachments)];
+
+        let last_broadcast_metadata = Arc::new(tokio::sync::RwLock::new(None));
+        let result = WasmChannel::dispatch_emitted_messages(
+            "test-channel",
+            messages,
+            &message_tx,
+            &rate_limiter,
+            &last_broadcast_metadata,
+            None,
+        )
+        .await;
+
+        assert!(result.is_ok());
+
+        let msg = rx.try_recv().expect("Should receive message");
+        assert_eq!(msg.content, "Check these files");
+        assert_eq!(msg.attachments.len(), 2);
+
+        // Verify first attachment
+        assert_eq!(msg.attachments[0].id, "photo123");
+        assert_eq!(msg.attachments[0].mime_type, "image/jpeg");
+        assert_eq!(msg.attachments[0].filename, Some("cat.jpg".to_string()));
+        assert_eq!(msg.attachments[0].size_bytes, Some(50_000));
+        assert_eq!(
+            msg.attachments[0].source_url,
+            Some("https://api.telegram.org/file/photo123".to_string())
+        );
+
+        // Verify second attachment
+        assert_eq!(msg.attachments[1].id, "doc456");
+        assert_eq!(msg.attachments[1].mime_type, "application/pdf");
+        assert_eq!(
+            msg.attachments[1].extracted_text,
+            Some("Report contents...".to_string())
+        );
+        assert_eq!(
+            msg.attachments[1].storage_key,
+            Some("store/doc456".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_emitted_messages_no_attachments_backward_compat() {
+        use crate::channels::wasm::host::EmittedMessage;
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(10);
+        let message_tx = Arc::new(tokio::sync::RwLock::new(Some(tx)));
+
+        let rate_limiter = Arc::new(tokio::sync::RwLock::new(
+            crate::channels::wasm::host::ChannelEmitRateLimiter::new(
+                crate::channels::wasm::capabilities::EmitRateLimitConfig::default(),
+            ),
+        ));
+
+        let messages = vec![EmittedMessage::new("user1", "Just text, no attachments")];
+
+        let last_broadcast_metadata = Arc::new(tokio::sync::RwLock::new(None));
+        let result = WasmChannel::dispatch_emitted_messages(
+            "test-channel",
+            messages,
+            &message_tx,
+            &rate_limiter,
+            &last_broadcast_metadata,
+            None,
+        )
+        .await;
+
+        assert!(result.is_ok());
+
+        let msg = rx.try_recv().expect("Should receive message");
+        assert_eq!(msg.content, "Just text, no attachments");
+        assert!(msg.attachments.is_empty());
     }
 }
