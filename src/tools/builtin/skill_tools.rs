@@ -1056,11 +1056,7 @@ mod tests {
                 "Expected is_private_ip({}) = false (public IP)",
                 ip_str
             );
-            assert!(
-                !ip.is_loopback(),
-                "Expected {} is not loopback",
-                ip_str
-            );
+            assert!(!ip.is_loopback(), "Expected {} is not loopback", ip_str);
         }
     }
 
@@ -1071,8 +1067,7 @@ mod tests {
         // must be correctly detected as private/loopback.
 
         // ::ffff:127.0.0.1 mapped -> 127.0.0.1 (loopback) -- must be blocked
-        let err =
-            super::validate_fetch_url("https://[::ffff:127.0.0.1]/skill.md").unwrap_err();
+        let err = super::validate_fetch_url("https://[::ffff:127.0.0.1]/skill.md").unwrap_err();
         assert!(
             err.to_string().contains("private") || err.to_string().contains("loopback"),
             "IPv4-mapped loopback should be blocked, got: {}",
@@ -1080,8 +1075,7 @@ mod tests {
         );
 
         // ::ffff:192.168.1.1 mapped -> 192.168.1.1 (private) -- must be blocked
-        let err =
-            super::validate_fetch_url("https://[::ffff:192.168.1.1]/skill.md").unwrap_err();
+        let err = super::validate_fetch_url("https://[::ffff:192.168.1.1]/skill.md").unwrap_err();
         assert!(
             err.to_string().contains("private") || err.to_string().contains("loopback"),
             "IPv4-mapped private should be blocked, got: {}",
@@ -1089,8 +1083,7 @@ mod tests {
         );
 
         // ::ffff:10.0.0.1 mapped -> 10.0.0.1 (private) -- must be blocked
-        let err =
-            super::validate_fetch_url("https://[::ffff:10.0.0.1]/skill.md").unwrap_err();
+        let err = super::validate_fetch_url("https://[::ffff:10.0.0.1]/skill.md").unwrap_err();
         assert!(
             err.to_string().contains("private") || err.to_string().contains("loopback"),
             "IPv4-mapped 10.x should be blocked, got: {}",
@@ -1104,8 +1097,7 @@ mod tests {
         );
 
         // Pure IPv6 loopback ::1 -- must be blocked
-        let err =
-            super::validate_fetch_url("https://[::1]/skill.md").unwrap_err();
+        let err = super::validate_fetch_url("https://[::1]/skill.md").unwrap_err();
         assert!(
             err.to_string().contains("private") || err.to_string().contains("loopback"),
             "IPv6 loopback should be blocked, got: {}",

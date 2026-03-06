@@ -326,7 +326,11 @@ mod tests {
         // Use the injection channel (simulating background task)
         let inject_tx = manager.inject_sender();
         inject_tx
-            .send(IncomingMessage::new("injected", "system", "background alert"))
+            .send(IncomingMessage::new(
+                "injected",
+                "system",
+                "background alert",
+            ))
             .await
             .expect("inject failed");
 

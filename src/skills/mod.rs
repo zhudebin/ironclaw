@@ -408,7 +408,10 @@ mod tests {
 
         // Short keywords (<3 chars) filtered, then truncated to 20
         assert!(
-            !criteria.keywords.iter().any(|k| k.len() < MIN_KEYWORD_TAG_LENGTH),
+            !criteria
+                .keywords
+                .iter()
+                .any(|k| k.len() < MIN_KEYWORD_TAG_LENGTH),
             "keywords shorter than {} chars should be filtered out",
             MIN_KEYWORD_TAG_LENGTH
         );
@@ -433,7 +436,10 @@ mod tests {
 
         // Short tags (<3 chars) filtered, then truncated to 10
         assert!(
-            !criteria.tags.iter().any(|t| t.len() < MIN_KEYWORD_TAG_LENGTH),
+            !criteria
+                .tags
+                .iter()
+                .any(|t| t.len() < MIN_KEYWORD_TAG_LENGTH),
             "tags shorter than {} chars should be filtered out",
             MIN_KEYWORD_TAG_LENGTH
         );
