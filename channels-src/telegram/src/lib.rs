@@ -1489,41 +1489,12 @@ fn extract_attachments(message: &TelegramMessage) -> Vec<InboundAttachment> {
         ));
     }
 
-    // Voice — download bytes for host-side transcription
+    // Voice
     if let Some(ref voice) = message.voice {
         let mime_type = voice
             .mime_type
             .clone()
             .unwrap_or_else(|| "audio/ogg".to_string());
-
-        // Download voice file (two HTTP roundtrips to Telegram API).
-        // Only available inside the WASM runtime where host functions exist.
-        #[cfg(target_arch = "wasm32")]
-        {
-            match download_voice_file(&voice.file_id) {
-                Ok(bytes) => {
-                    channel_host::log(
-                        channel_host::LogLevel::Info,
-                        &format!("Downloaded voice file: {} bytes", bytes.len()),
-                    );
-                    // Store binary data via host function (avoids bloating the record)
-                    if let Err(e) =
-                        channel_host::store_attachment_data(&voice.file_id, &bytes)
-                    {
-                        channel_host::log(
-                            channel_host::LogLevel::Error,
-                            &format!("Failed to store voice data: {}", e),
-                        );
-                    }
-                }
-                Err(e) => {
-                    channel_host::log(
-                        channel_host::LogLevel::Error,
-                        &format!("Failed to download voice file: {}", e),
-                    );
-                }
-            };
-        }
 
         attachments.push(make_inbound_attachment(
             voice.file_id.clone(),
@@ -1552,10 +1523,51 @@ fn extract_attachments(message: &TelegramMessage) -> Vec<InboundAttachment> {
     attachments
 }
 
+/// Download voice file bytes and store them via the host for transcription.
+///
+/// Separated from `extract_attachments` so that function stays pure (no host
+/// calls) and remains testable in native unit tests.
+fn download_and_store_voice(attachments: &[InboundAttachment]) {
+    for att in attachments {
+        // Voice attachments have a generated filename like "voice_<id>.ogg"
+        let is_voice = att
+            .filename
+            .as_ref()
+            .is_some_and(|f| f.starts_with("voice_"));
+        if !is_voice {
+            continue;
+        }
+
+        match download_voice_file(&att.id) {
+            Ok(bytes) => {
+                channel_host::log(
+                    channel_host::LogLevel::Info,
+                    &format!("Downloaded voice file: {} bytes", bytes.len()),
+                );
+                if let Err(e) = channel_host::store_attachment_data(&att.id, &bytes) {
+                    channel_host::log(
+                        channel_host::LogLevel::Error,
+                        &format!("Failed to store voice data: {}", e),
+                    );
+                }
+            }
+            Err(e) => {
+                channel_host::log(
+                    channel_host::LogLevel::Error,
+                    &format!("Failed to download voice file: {}", e),
+                );
+            }
+        }
+    }
+}
+
 /// Process a single message.
 fn handle_message(message: TelegramMessage) {
-    // Extract attachments from media fields
+    // Extract attachments from media fields (pure data mapping, no host calls)
     let attachments = extract_attachments(&message);
+
+    // Download and store voice attachments for host-side transcription
+    download_and_store_voice(&attachments);
 
     // Use text or caption (for media messages)
     let has_voice = message.voice.is_some();
