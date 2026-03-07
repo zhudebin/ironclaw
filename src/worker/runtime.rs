@@ -284,9 +284,9 @@ Work independently to complete this job. Report when done."#,
                         reason_ctx.messages.push(ChatMessage::assistant(&response));
 
                         // Nudge the LLM if it expressed tool intent without calling tools
-                        if !reason_ctx.available_tools.is_empty()
-                            && consecutive_tool_intent_nudges < MAX_TOOL_INTENT_NUDGES
-                            && crate::llm::llm_signals_tool_intent(&response)
+                        let signals_intent = !reason_ctx.available_tools.is_empty()
+                            && crate::llm::llm_signals_tool_intent(&response);
+                        if signals_intent && consecutive_tool_intent_nudges < MAX_TOOL_INTENT_NUDGES
                         {
                             consecutive_tool_intent_nudges += 1;
                             tracing::info!(
@@ -295,7 +295,7 @@ Work independently to complete this job. Report when done."#,
                             reason_ctx
                                 .messages
                                 .push(ChatMessage::user(crate::llm::TOOL_INTENT_NUDGE));
-                        } else {
+                        } else if !signals_intent {
                             consecutive_tool_intent_nudges = 0;
                         }
                     }

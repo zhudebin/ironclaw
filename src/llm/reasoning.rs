@@ -30,7 +30,7 @@ Use the tool_calls mechanism to invoke the appropriate tool.";
 /// Exclusion phrases (e.g. "let me explain") are checked first to avoid
 /// false positives on conversational language.
 pub fn llm_signals_tool_intent(response: &str) -> bool {
-    // Extract only non-code, non-quoted lines
+    // Extract only non-code lines with quoted strings removed
     let text = strip_code_blocks(response);
     let lower = text.to_lowercase();
 
@@ -94,8 +94,8 @@ pub fn llm_signals_tool_intent(response: &str) -> bool {
     false
 }
 
-/// Strip fenced code blocks (``` ... ```) and indented code lines (4+ spaces / tab)
-/// so that tool-intent detection only fires on prose.
+/// Strip fenced code blocks (``` ... ```), indented code lines (4+ spaces / tab),
+/// and double-quoted strings so that tool-intent detection only fires on prose.
 fn strip_code_blocks(text: &str) -> String {
     let mut result = String::new();
     let mut in_fence = false;
@@ -113,8 +113,28 @@ fn strip_code_blocks(text: &str) -> String {
         if line.starts_with("    ") || line.starts_with('\t') {
             continue;
         }
-        result.push_str(line);
+        // Strip double-quoted strings to avoid matching intent phrases inside quotes
+        let stripped = strip_quoted_strings(line);
+        result.push_str(&stripped);
         result.push('\n');
+    }
+    result
+}
+
+/// Remove double-quoted string literals from a line.
+fn strip_quoted_strings(line: &str) -> String {
+    let mut result = String::with_capacity(line.len());
+    let mut in_quote = false;
+    let mut prev = '\0';
+    for ch in line.chars() {
+        if ch == '"' && prev != '\\' {
+            in_quote = !in_quote;
+            continue;
+        }
+        if !in_quote {
+            result.push(ch);
+        }
+        prev = ch;
     }
     result
 }
@@ -2171,6 +2191,16 @@ That's my plan."#;
     fn test_llm_signals_tool_intent_quoted_string_in_code_block() {
         let text = "The button text should say:\n```\n\"I will create your account\"\n```";
         assert!(!llm_signals_tool_intent(text));
+    }
+
+    #[test]
+    fn test_llm_signals_tool_intent_quoted_string_outside_code_block() {
+        // Quoted intent phrase in prose should not trigger.
+        let text = "The button says \"Let me search the database\" to the user.";
+        assert!(!llm_signals_tool_intent(text));
+        // But unquoted intent in the same line should still trigger.
+        let text = "I'll fetch the results for you.";
+        assert!(llm_signals_tool_intent(text));
     }
 
     #[test]

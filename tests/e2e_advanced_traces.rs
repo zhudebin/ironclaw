@@ -344,8 +344,8 @@ mod advanced {
 
         // Verify both nudges fired: calls 2 and 3 should have the nudge
         // message as the last user message.
-        for (i, call_idx) in [1usize, 2].iter().enumerate() {
-            let msgs = &captured[*call_idx];
+        for call_idx in [1usize, 2] {
+            let msgs = &captured[call_idx];
             let last_user = msgs
                 .iter()
                 .rev()
@@ -353,7 +353,7 @@ mod advanced {
             assert!(
                 last_user.is_some_and(|m| m.content.contains("tool_calls mechanism")),
                 "call {} should have the nudge as last user message",
-                i + 1
+                call_idx + 1
             );
         }
 
