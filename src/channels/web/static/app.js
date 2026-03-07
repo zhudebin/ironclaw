@@ -1270,6 +1270,7 @@ function threadTitle(thread) {
   if (thread.thread_type === 'heartbeat') return 'Heartbeat Alerts';
   if (thread.thread_type === 'routine') return 'Routine: ' + thread.id.substring(0, 8);
   if (ch !== 'gateway') return ch.charAt(0).toUpperCase() + ch.slice(1);
+  if (thread.turn_count === 0) return 'New chat';
   return thread.id.substring(0, 8);
 }
 
@@ -1302,6 +1303,11 @@ function loadThreads() {
       const el = document.getElementById('assistant-thread');
       const isActive = currentThreadId === assistantThreadId;
       el.className = 'assistant-item' + (isActive ? ' active' : '');
+      const labelEl = document.getElementById('assistant-label');
+      if (labelEl) {
+        const at = data.assistant_thread;
+        labelEl.textContent = at.title || (at.turn_count === 0 ? 'New chat' : 'Assistant');
+      }
       const meta = document.getElementById('assistant-meta');
       meta.textContent = relativeTime(data.assistant_thread.updated_at);
     }
