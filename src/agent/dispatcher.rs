@@ -300,6 +300,7 @@ impl Agent {
                     // This is common with non-Anthropic models (e.g. GLM-5 via NEAR AI)
                     // that output "Let me search…" but don't issue tool_calls.
                     if !force_text
+                        && !context.available_tools.is_empty()
                         && consecutive_tool_intent_nudges < MAX_TOOL_INTENT_NUDGES
                         && crate::llm::llm_signals_tool_intent(&text)
                     {

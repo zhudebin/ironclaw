@@ -25,7 +25,7 @@ Use the tool_calls mechanism to invoke the appropriate tool.";
 
 /// Detect when an LLM response expresses intent to call a tool without
 /// actually issuing tool calls. Returns `true` if the text contains phrases
-/// like "Let me search …" or "I'll fetch …" outside of code blocks/quotes.
+/// like "Let me search …" or "I'll fetch …" outside of fenced/indented code blocks.
 ///
 /// Exclusion phrases (e.g. "let me explain") are checked first to avoid
 /// false positives on conversational language.
@@ -81,7 +81,8 @@ pub fn llm_signals_tool_intent(response: &str) -> bool {
     ];
 
     for prefix in PREFIXES {
-        if let Some(after) = lower.find(prefix).map(|i| &lower[i + prefix.len()..]) {
+        for (i, _) in lower.match_indices(prefix) {
+            let after = &lower[i + prefix.len()..];
             for verb in ACTION_VERBS {
                 if after.starts_with(verb) || after.contains(&format!(" {verb}")) {
                     return true;
@@ -2170,5 +2171,17 @@ That's my plan."#;
     fn test_llm_signals_tool_intent_quoted_string_in_code_block() {
         let text = "The button text should say:\n```\n\"I will create your account\"\n```";
         assert!(!llm_signals_tool_intent(text));
+    }
+
+    #[test]
+    fn test_llm_signals_tool_intent_shadowed_prefix() {
+        // An earlier non-intent "let me" should not shadow a later real intent.
+        let text = "Sure, let me think about it. Actually, let me search for the file.";
+        // "let me think" is an exclusion, so this returns false despite the second "let me search".
+        assert!(!llm_signals_tool_intent(text));
+
+        // But without an exclusion phrase, multiple prefixes should be checked.
+        let text = "I said let me be clear, then let me fetch the data.";
+        assert!(llm_signals_tool_intent(text));
     }
 }

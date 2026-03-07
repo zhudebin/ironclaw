@@ -506,11 +506,14 @@ Report when the job is complete or if you encounter issues you cannot resolve."#
                             reason_ctx
                                 .messages
                                 .push(ChatMessage::user(crate::llm::TOOL_INTENT_NUDGE));
-                        } else if iteration > 3 && iteration % 5 == 0 {
-                            // Generic fallback nudge
-                            reason_ctx.messages.push(ChatMessage::user(
-                                "Are you stuck? Do you need help completing this job?",
-                            ));
+                        } else {
+                            consecutive_tool_intent_nudges = 0;
+                            if iteration > 3 && iteration % 5 == 0 {
+                                // Generic fallback nudge
+                                reason_ctx.messages.push(ChatMessage::user(
+                                    "Are you stuck? Do you need help completing this job?",
+                                ));
+                            }
                         }
                     }
                     RespondResult::ToolCalls {

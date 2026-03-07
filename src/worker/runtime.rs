@@ -295,6 +295,8 @@ Work independently to complete this job. Report when done."#,
                             reason_ctx
                                 .messages
                                 .push(ChatMessage::user(crate::llm::TOOL_INTENT_NUDGE));
+                        } else {
+                            consecutive_tool_intent_nudges = 0;
                         }
                     }
                     RespondResult::ToolCalls {
