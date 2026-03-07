@@ -20,9 +20,7 @@ pub fn extract_text(data: &[u8], mime: &str, filename: Option<&str>) -> Result<S
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => extract_xlsx(data),
 
         // Legacy Office (best-effort: treat as binary, try text extraction)
-        "application/msword"
-        | "application/vnd.ms-powerpoint"
-        | "application/vnd.ms-excel" => {
+        "application/msword" | "application/vnd.ms-powerpoint" | "application/vnd.ms-excel" => {
             // Legacy binary formats — try to extract any text strings
             extract_binary_strings(data)
         }
@@ -49,12 +47,8 @@ pub fn extract_text(data: &[u8], mime: &str, filename: Option<&str>) -> Result<S
         | "text/x-log" => extract_utf8(data),
 
         // JSON / XML / YAML application types
-        "application/json"
-        | "application/xml"
-        | "application/x-yaml"
-        | "application/yaml"
-        | "application/toml"
-        | "application/x-sh" => extract_utf8(data),
+        "application/json" | "application/xml" | "application/x-yaml" | "application/yaml"
+        | "application/toml" | "application/x-sh" => extract_utf8(data),
 
         // RTF
         "application/rtf" | "text/rtf" => extract_rtf(data),
@@ -439,10 +433,7 @@ fn parse_xlsx_sheet(xml: &str, shared_strings: &[String]) -> String {
 
 /// Try to extract text based on filename extension when MIME type is generic.
 fn try_extract_by_extension(data: &[u8], filename: Option<&str>) -> Option<String> {
-    let ext = filename?
-        .rsplit('.')
-        .next()?
-        .to_lowercase();
+    let ext = filename?.rsplit('.').next()?.to_lowercase();
 
     match ext.as_str() {
         "pdf" => extract_pdf(data).ok(),
@@ -452,11 +443,9 @@ fn try_extract_by_extension(data: &[u8], filename: Option<&str>) -> Option<Strin
         "doc" | "ppt" | "xls" => extract_binary_strings(data).ok(),
         "rtf" => extract_rtf(data).ok(),
         "txt" | "csv" | "tsv" | "json" | "xml" | "yaml" | "yml" | "toml" | "md" | "markdown"
-        | "py" | "js" | "ts" | "rs" | "go" | "java" | "c" | "cpp" | "h" | "hpp" | "rb"
-        | "sh" | "bash" | "zsh" | "fish" | "css" | "html" | "htm" | "sql" | "log"
-        | "ini" | "cfg" | "conf" | "env" | "gitignore" | "dockerfile" => {
-            extract_utf8(data).ok()
-        }
+        | "py" | "js" | "ts" | "rs" | "go" | "java" | "c" | "cpp" | "h" | "hpp" | "rb" | "sh"
+        | "bash" | "zsh" | "fish" | "css" | "html" | "htm" | "sql" | "log" | "ini" | "cfg"
+        | "conf" | "env" | "gitignore" | "dockerfile" => extract_utf8(data).ok(),
         _ => None,
     }
 }

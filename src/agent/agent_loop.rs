@@ -653,10 +653,7 @@ impl Agent {
                 _ => continue,
             };
 
-            let filename = attachment
-                .filename
-                .as_deref()
-                .unwrap_or("unnamed_document");
+            let filename = attachment.filename.as_deref().unwrap_or("unnamed_document");
             let date = chrono::Utc::now().format("%Y-%m-%d");
             let path = format!("documents/{date}/{filename}");
 

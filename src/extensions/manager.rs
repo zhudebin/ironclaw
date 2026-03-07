@@ -490,8 +490,7 @@ impl ExtensionManager {
                             .registry
                             .get_with_kind(&name, Some(ExtensionKind::WasmChannel))
                             .await;
-                        let display_name =
-                            registry_entry.as_ref().map(|e| e.display_name.clone());
+                        let display_name = registry_entry.as_ref().map(|e| e.display_name.clone());
                         let version = if let Some(ref cap_path) = discovered.capabilities_path {
                             tokio::fs::read(cap_path)
                                 .await

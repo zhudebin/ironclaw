@@ -203,12 +203,9 @@ mod tests {
     #[tokio::test]
     async fn extracts_plain_text() {
         let middleware = DocumentExtractionMiddleware::new();
-        let mut msg = IncomingMessage::new("test", "user1", "check this")
-            .with_attachments(vec![doc_attachment(
-                "text/plain",
-                "notes.txt",
-                b"Hello world".to_vec(),
-            )]);
+        let mut msg = IncomingMessage::new("test", "user1", "check this").with_attachments(vec![
+            doc_attachment("text/plain", "notes.txt", b"Hello world".to_vec()),
+        ]);
 
         middleware.process(&mut msg).await;
         assert_eq!(
@@ -247,8 +244,7 @@ mod tests {
         let middleware = DocumentExtractionMiddleware::new();
         let mut att = doc_attachment("text/plain", "test.txt", b"data".to_vec());
         att.extracted_text = Some("Already done".to_string());
-        let mut msg =
-            IncomingMessage::new("test", "user1", "").with_attachments(vec![att]);
+        let mut msg = IncomingMessage::new("test", "user1", "").with_attachments(vec![att]);
 
         middleware.process(&mut msg).await;
         assert_eq!(
@@ -262,8 +258,7 @@ mod tests {
         let middleware = DocumentExtractionMiddleware::new();
         let mut att = doc_attachment("text/plain", "test.txt", b"data".to_vec());
         att.kind = AttachmentKind::Audio;
-        let mut msg =
-            IncomingMessage::new("test", "user1", "").with_attachments(vec![att]);
+        let mut msg = IncomingMessage::new("test", "user1", "").with_attachments(vec![att]);
 
         middleware.process(&mut msg).await;
         assert!(msg.attachments[0].extracted_text.is_none());
@@ -274,8 +269,7 @@ mod tests {
         let middleware = DocumentExtractionMiddleware::new();
         let mut att = doc_attachment("text/plain", "huge.txt", vec![]);
         att.size_bytes = Some(MAX_DOCUMENT_SIZE + 1);
-        let mut msg =
-            IncomingMessage::new("test", "user1", "").with_attachments(vec![att]);
+        let mut msg = IncomingMessage::new("test", "user1", "").with_attachments(vec![att]);
 
         middleware.process(&mut msg).await;
         let text = msg.attachments[0].extracted_text.as_deref().unwrap();
@@ -289,9 +283,12 @@ mod tests {
     async fn truncates_long_text() {
         let middleware = DocumentExtractionMiddleware::new();
         let long_text = "x".repeat(MAX_EXTRACTED_TEXT_LEN + 1000);
-        let mut msg = IncomingMessage::new("test", "user1", "read").with_attachments(vec![
-            doc_attachment("text/plain", "long.txt", long_text.into_bytes()),
-        ]);
+        let mut msg =
+            IncomingMessage::new("test", "user1", "read").with_attachments(vec![doc_attachment(
+                "text/plain",
+                "long.txt",
+                long_text.into_bytes(),
+            )]);
 
         middleware.process(&mut msg).await;
         let extracted = msg.attachments[0].extracted_text.as_ref().unwrap();
@@ -304,9 +301,12 @@ mod tests {
         // Minimal valid PDF with text "Hello World"
         let pdf_bytes = include_bytes!("../../tests/fixtures/hello.pdf");
         let middleware = DocumentExtractionMiddleware::new();
-        let mut msg = IncomingMessage::new("test", "user1", "review").with_attachments(vec![
-            doc_attachment("application/pdf", "hello.pdf", pdf_bytes.to_vec()),
-        ]);
+        let mut msg =
+            IncomingMessage::new("test", "user1", "review").with_attachments(vec![doc_attachment(
+                "application/pdf",
+                "hello.pdf",
+                pdf_bytes.to_vec(),
+            )]);
 
         middleware.process(&mut msg).await;
         let text = msg.attachments[0].extracted_text.as_deref().unwrap_or("");
