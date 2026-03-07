@@ -154,7 +154,7 @@ echo
 
 echo "--- Check 4: Test tier gating for integration tests ---"
 
-tier_violations=""
+tier_violations=()
 for test_file in tests/*.rs; do
     [ -f "$test_file" ] || continue
 
@@ -169,14 +169,14 @@ for test_file in tests/*.rs; do
     if [ "$needs_gate" = true ]; then
         # Check first 5 lines for the cfg gate
         if ! head -5 "$test_file" | grep -q 'cfg.*feature.*integration' 2>/dev/null; then
-            tier_violations="$tier_violations\n  $test_file: needs #![cfg(all(feature = \"postgres\", feature = \"integration\"))]"
+            tier_violations+=("  $test_file: needs '#![cfg(all(feature = \"postgres\", feature = \"integration\"))]'")
         fi
     fi
 done
 
-if [ -n "$tier_violations" ]; then
+if [ ${#tier_violations[@]} -gt 0 ]; then
     echo "VIOLATION: Integration tests missing feature gate:"
-    echo -e "$tier_violations"
+    printf '%s\n' "${tier_violations[@]}"
     echo
     echo "(Tests requiring external services must be gated behind the 'integration' feature)"
     violations=$((violations + 1))
