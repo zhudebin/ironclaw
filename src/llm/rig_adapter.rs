@@ -36,8 +36,9 @@ pub struct RigAdapter<M: CompletionModel> {
     input_cost: Decimal,
     output_cost: Decimal,
     /// Prompt cache retention policy (Anthropic only).
-    /// Controls cost tracking multipliers for cache-creation tokens.
-    /// Actual cache injection is handled by rig-core's `.with_prompt_caching()`.
+    /// When not `CacheRetention::None`, injects top-level `cache_control`
+    /// via `additional_params` for Anthropic automatic caching. Also controls
+    /// the cost multiplier for cache-creation tokens.
     cache_retention: CacheRetention,
 }
 
@@ -56,15 +57,16 @@ impl<M: CompletionModel> RigAdapter<M> {
         }
     }
 
-    /// Set Anthropic prompt cache retention policy for cost tracking.
+    /// Set Anthropic prompt cache retention policy.
     ///
-    /// This controls the `cache_write_multiplier()` used for cost calculations:
-    /// - `None` — no surcharge (1.0×).
-    /// - `Short` — 5-minute TTL, 1.25× write surcharge.
-    /// - `Long` — 1-hour TTL, 2.0× write surcharge.
+    /// Controls both cache injection and cost tracking:
+    /// - `None` — no caching, no surcharge (1.0×).
+    /// - `Short` — 5-minute TTL via `{"type": "ephemeral"}`, 1.25× write surcharge.
+    /// - `Long` — 1-hour TTL via `{"type": "ephemeral", "ttl": "1h"}`, 2.0× write surcharge.
     ///
-    /// Actual cache injection is handled by rig-core's `.with_prompt_caching()`
-    /// on the Anthropic `CompletionModel`, not by this adapter.
+    /// Cache injection uses Anthropic's **automatic caching** — a top-level
+    /// `cache_control` field in `additional_params` that gets `#[serde(flatten)]`'d
+    /// into the request body by rig-core.
     ///
     /// If the configured model does not support caching (e.g. claude-2),
     /// a warning is logged once at construction and caching is disabled.
@@ -422,8 +424,13 @@ fn extract_cache_creation<T: Serialize>(raw: &T) -> u32 {
 
 /// Build a rig-core CompletionRequest from our internal types.
 ///
-/// Cache injection is NOT done here — rig-core's Anthropic `CompletionModel`
-/// handles it natively when `.with_prompt_caching()` is set.
+/// When `cache_retention` is not `None`, injects a top-level `cache_control`
+/// field via `additional_params`. Rig-core's `AnthropicCompletionRequest`
+/// uses `#[serde(flatten)]` on `additional_params`, so the field lands at
+/// the request root — which is exactly what Anthropic's **automatic caching**
+/// expects. The API auto-places the cache breakpoint at the last cacheable
+/// block and moves it forward as conversations grow.
+#[allow(clippy::too_many_arguments)]
 fn build_rig_request(
     preamble: Option<String>,
     mut history: Vec<RigMessage>,
@@ -431,6 +438,7 @@ fn build_rig_request(
     tool_choice: Option<RigToolChoice>,
     temperature: Option<f32>,
     max_tokens: Option<u32>,
+    cache_retention: CacheRetention,
 ) -> Result<RigRequest, LlmError> {
     // rig-core requires at least one message in chat_history
     if history.is_empty() {
@@ -442,6 +450,17 @@ fn build_rig_request(
         reason: format!("Failed to build chat history: {}", e),
     })?;
 
+    // Inject top-level cache_control for Anthropic automatic prompt caching.
+    let additional_params = match cache_retention {
+        CacheRetention::None => None,
+        CacheRetention::Short => Some(serde_json::json!({
+            "cache_control": {"type": "ephemeral"}
+        })),
+        CacheRetention::Long => Some(serde_json::json!({
+            "cache_control": {"type": "ephemeral", "ttl": "1h"}
+        })),
+    };
+
     Ok(RigRequest {
         preamble,
         chat_history,
@@ -450,7 +469,7 @@ fn build_rig_request(
         temperature: temperature.map(|t| t as f64),
         max_tokens: max_tokens.map(|t| t as u64),
         tool_choice,
-        additional_params: None,
+        additional_params,
     })
 }
 
@@ -498,6 +517,7 @@ where
             None,
             request.temperature,
             request.max_tokens,
+            self.cache_retention,
         )?;
 
         let response =
@@ -563,6 +583,7 @@ where
             tool_choice,
             request.temperature,
             request.max_tokens,
+            self.cache_retention,
         )?;
 
         let response =
@@ -970,9 +991,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_rig_request_no_additional_params() {
-        // Cache injection is handled by rig-core's .with_prompt_caching(), not by
-        // build_rig_request. Verify additional_params is always None.
+    fn test_build_rig_request_injects_cache_control_short() {
         let req = build_rig_request(
             Some("You are helpful.".to_string()),
             vec![RigMessage::user("Hello")],
@@ -980,12 +999,56 @@ mod tests {
             None,
             None,
             None,
+            CacheRetention::Short,
+        )
+        .unwrap();
+
+        let params = req
+            .additional_params
+            .expect("should have additional_params for Short retention");
+        assert_eq!(params["cache_control"]["type"], "ephemeral");
+        assert!(
+            params["cache_control"].get("ttl").is_none(),
+            "Short retention should not include ttl"
+        );
+    }
+
+    #[test]
+    fn test_build_rig_request_injects_cache_control_long() {
+        let req = build_rig_request(
+            Some("You are helpful.".to_string()),
+            vec![RigMessage::user("Hello")],
+            Vec::new(),
+            None,
+            None,
+            None,
+            CacheRetention::Long,
+        )
+        .unwrap();
+
+        let params = req
+            .additional_params
+            .expect("should have additional_params for Long retention");
+        assert_eq!(params["cache_control"]["type"], "ephemeral");
+        assert_eq!(params["cache_control"]["ttl"], "1h");
+    }
+
+    #[test]
+    fn test_build_rig_request_no_cache_control_when_none() {
+        let req = build_rig_request(
+            Some("You are helpful.".to_string()),
+            vec![RigMessage::user("Hello")],
+            Vec::new(),
+            None,
+            None,
+            None,
+            CacheRetention::None,
         )
         .unwrap();
 
         assert!(
             req.additional_params.is_none(),
-            "additional_params should always be None (rig handles cache injection)"
+            "additional_params should be None when cache is disabled"
         );
     }
 

@@ -11,15 +11,11 @@ use crate::settings::Settings;
 
 /// Prompt cache retention policy for Anthropic.
 ///
-/// Controls whether rig-core's native prompt caching is enabled and the
-/// cost multiplier applied to cache-creation tokens.
-/// - `None` — caching disabled.
-/// - `Short` — 5-minute TTL (default), 1.25× write surcharge.
-/// - `Long` — 1-hour TTL, 2× write surcharge.
-///
-/// Note: rig-core 0.30's `CacheControl` enum only supports `Ephemeral`
-/// (5-minute TTL). `Long` is treated identically to `Short` for cache
-/// injection but applies the higher write surcharge for cost tracking.
+/// Controls Anthropic's automatic prompt caching via a top-level
+/// `cache_control` field injected through rig-core's `additional_params`.
+/// - `None` — caching disabled, no `cache_control` injected.
+/// - `Short` — 5-minute TTL (default), `{"type": "ephemeral"}`, 1.25× write surcharge.
+/// - `Long` — 1-hour TTL, `{"type": "ephemeral", "ttl": "1h"}`, 2× write surcharge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CacheRetention {
     /// No prompt caching.
@@ -28,9 +24,6 @@ pub enum CacheRetention {
     #[default]
     Short,
     /// 1-hour TTL. Write cost: 2× base input.
-    /// Note: rig-core 0.30 does not support the `ttl` field on `CacheControl`,
-    /// so this currently behaves like `Short` for cache injection. The higher
-    /// write surcharge is still applied for accurate cost tracking.
     Long,
 }
 

@@ -203,6 +203,9 @@ fn create_anthropic_from_registry(
     })?;
 
     // Resolve prompt cache retention from env (default: Short).
+    // Injects top-level cache_control via additional_params for Anthropic
+    // automatic caching (the API auto-places the breakpoint at the last
+    // cacheable block).
     let cache_retention: CacheRetention = optional_env("ANTHROPIC_CACHE_RETENTION")
         .ok()
         .flatten()
@@ -215,18 +218,15 @@ fn create_anthropic_from_registry(
         })
         .unwrap_or_default();
 
-    // Use rig-core's native prompt caching: places cache_control breakpoints
-    // on system prompt and last message content block.
-    let model = if cache_retention != CacheRetention::None {
+    let model = client.completion_model(&config.model);
+
+    if cache_retention != CacheRetention::None {
         tracing::info!(
             model = %config.model,
             retention = %cache_retention,
-            "Anthropic prompt caching enabled via rig-core"
+            "Anthropic automatic prompt caching enabled"
         );
-        client.completion_model(&config.model).with_prompt_caching()
-    } else {
-        client.completion_model(&config.model)
-    };
+    }
 
     tracing::info!(
         provider = %config.provider_id,

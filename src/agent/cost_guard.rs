@@ -158,6 +158,7 @@ impl CostGuard {
     /// When `cost_per_token` is `Some`, those rates are used directly (provider-
     /// sourced pricing). When `None`, falls back to the static `costs::model_cost`
     /// lookup table, then `costs::default_cost`.
+    #[allow(clippy::too_many_arguments)]
     pub async fn record_llm_call(
         &self,
         model: &str,
