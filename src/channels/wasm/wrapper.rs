@@ -2998,10 +2998,8 @@ fn read_attachments(paths: &[String]) -> Result<Vec<wit_channel::Attachment>, St
 
     for path in paths {
         // Validate paths are under /tmp/ or ~/.ironclaw/ to prevent arbitrary file reads
-        let validated =
-            crate::tools::builtin::path_utils::validate_path(path, Some(tmp_base)).or_else(
-                |_| crate::tools::builtin::path_utils::validate_path(path, Some(&home_base)),
-            );
+        let validated = crate::tools::builtin::path_utils::validate_path(path, Some(tmp_base))
+            .or_else(|_| crate::tools::builtin::path_utils::validate_path(path, Some(&home_base)));
         validated.map_err(|e| {
             format!(
                 "Invalid attachment path '{}': must be under /tmp/ or ~/.ironclaw/: {}",

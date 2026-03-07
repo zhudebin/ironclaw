@@ -141,7 +141,6 @@ impl DocumentExtractionMiddleware {
             msg.attachments[i].extracted_text = Some(text);
         }
     }
-
 }
 
 #[cfg(test)]

@@ -657,7 +657,13 @@ impl Agent {
             let raw_name = attachment.filename.as_deref().unwrap_or("unnamed_document");
             let filename: String = raw_name
                 .chars()
-                .map(|c| if c == '/' || c == '\\' || c == '\0' { '_' } else { c })
+                .map(|c| {
+                    if c == '/' || c == '\\' || c == '\0' {
+                        '_'
+                    } else {
+                        c
+                    }
+                })
                 .collect();
             let filename = filename.trim_start_matches('.');
             let filename = if filename.is_empty() {
